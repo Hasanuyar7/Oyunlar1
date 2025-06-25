@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<link rel="shortcut icon" href="./favicon.png">
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Air Hockey 3D</title>
+<style>
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: #0f0f0f;
+    color: white;
+    font-family: sans-serif;
+    user-select: none;
+    height: 100vh;
+    position: relative;
+  }
+  #gameTitle {
+    position: fixed;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: white;
+    font-size: 28px;
+    font-weight: 700;
+    z-index: 15;
+    user-select: none;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    text-shadow: 0 0 5px #00bfff, 0 0 10px #00bfff;
+  }
+  #backgroundCanvas, #gameCanvas {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    background: transparent;
+    display: block;
+    pointer-events: none;
+  }
+  #backgroundCanvas { z-index: 0; }
+  #gameCanvas { z-index: 1; background: transparent; }
+  #leftButton {
+    position: fixed;
+    top: 50%;
+    left: 10px;
+    transform: translateY(-50%);
+    z-index: 10;
+    pointer-events:auto;
+  }
+  #rightButton {
+    position: fixed;
+    top: 50%;
+    right: 10px;
+    transform: translateY(-50%);
+    z-index: 10;
+    pointer-events:auto;
+  }
+  button {
+    padding: 10px 20px;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+    border: none;
+    border-radius: 5px;
+    background-color: #333;
+    color: white;
+    transition: background-color 0.3s ease;
+    min-width: 150px;
+  }
+  button:hover {
+    background-color: #555;
+  }
+  #difficultySelect {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: #222;
+    border: none;
+    color: white;
+    font-size: 14px;
+    padding: 8px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-family: inherit;
+    z-index: 10;
+    min-width: 120px;
+    pointer-events:auto;
+  }
+  #gameOverPopup {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: #222;
+    padding: 30px 50px;
+    border-radius: 10px;
+    text-align: center;
+    color: #fff;
+    font-size: 24px;
+    display: none;
+    z-index: 20;
+    min-width: 300px;
+  }
+  #gameOverPopup button {
+    margin-top: 20px;
+    padding: 8px 20px;
+    font-size: 18px;
+    cursor: pointer;
+    border: none;
+    background: #4caf50;
+    color: white;
+    border-radius: 5px;
+  }
+</style>
+</head>
+<body>
+  <h1 id="gameTitle">⚡️5 Yapan kazanır⚡️</h1>
+
+  <canvas id="backgroundCanvas" width="800" height="600"></canvas>
+  <canvas id="gameCanvas" width="800" height="600"></canvas>
+
+  <button id="leftButton" onclick="startGame('bot')">Yapay Zeka ile Oyna</button>
+  <button id="rightButton" onclick="startGame('two')">2 Kişilik Oyna</button>
+
+  <select id="difficultySelect" title="Zorluk Seviyesi">
+    <option value="easy">Kolay</option>
+    <option value="medium" selected>Orta</option>
+    <option value="hard">Zor</option>
+  </select>
+
+  <div id="gameOverPopup">
+    <div id="winnerText"></div>
+    <button onclick="restartGame()">Tekrar Oyna</button>
+  </div>
+
+<script>
+  const bgCanvas = document.getElementById('backgroundCanvas');
+  const bgCtx = bgCanvas.getContext('2d');
+  const canvas = document.getElementById("gameCanvas");
+  const ctx = canvas.getContext("2d");
+
+  const paddleRadius = 40;
+  const puckRadius = 20;
+  const scoreLimit = 5;
+
+  const player = { x: 60, y: canvas.height / 2, radius: paddleRadius };
+  const player2 = { x: canvas.width - 60, y: canvas.height / 2, radius: paddleRadius };
+  const puck = { x: canvas.width / 2, y: canvas.height / 2, vx: 4, vy: 4, radius: puckRadius };
+
+  let playerScore = 0;
+  let player2Score = 0;
+  let seconds = 0;
+  let gameMode = 'bot';
+  let gameOver = false;
+  let timer = null;
+
+  let botSpeed = 3;
+
+  const beep = new Audio();
+  beep.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=";
+
+  function startTimer() {
+    clearInterval(timer);
+    seconds = 0;
+    timer = setInterval(() => {
+      if (!gameOver) seconds++;
+    }, 1000);
+  }
+
+  // Fare ile kontrol
+  let mouseY = canvas.height / 2;
+  let mouseX = canvas.width / 2;
+
+  window.addEventListener('mousemove', e => {
+    const rect = canvas.getBoundingClientRect();
+    mouseX = e.clientX - rect.left;
+    mouseY = e.clientY - rect.top;
+  });
+
+  function movePlayersWithMouse() {
+    if(gameOver) return;
+
+    if(gameMode === 'bot') {
+      player.y = clamp(mouseY, paddleRadius, canvas.height - paddleRadius);
+      moveBot();
+    } else if(gameMode === 'two') {
+      if(mouseX < canvas.width / 2) {
+        player.y = clamp(mouseY, paddleRadius, canvas.height - paddleRadius);
+      } else {
+        player2.y = clamp(mouseY, paddleRadius, canvas.height - paddleRadius);
+      }
+    }
+  }
+
+  function clamp(val, min, max) {
+    return Math.min(Math.max(val, min), max);
+  }
+
+  function resetPuck() {
+    puck.x = canvas.width / 2;
+    puck.y = canvas.height / 2;
+    puck.vx = (Math.random() > 0.5 ? 4 : -4);
+    puck.vy = (Math.random() > 0.5 ? 4 : -4);
+  }
+
+  function checkCollision(p, o) {
+    const dx = p.x - o.x;
+    const dy = p.y - o.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    return dist < p.radius + o.radius;
+  }
+
+  function drawCircle(obj, color) {
+    ctx.beginPath();
+    ctx.arc(obj.x, obj.y, obj.radius, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+  }
+
+  function moveBot() {
+    if (gameOver) return;
+    if (puck.y < player2.y - 5) player2.y -= botSpeed;
+    else if (puck.y > player2.y + 5) player2.y += botSpeed;
+    player2.y = clamp(player2.y, paddleRadius, canvas.height - paddleRadius);
+  }
+
+  function checkGoal() {
+    if (puck.x - puck.radius <= 0) {
+      player2Score++;
+      beep.play();
+      resetPuck();
+      checkGameOver();
+    }
+    if (puck.x + puck.radius >= canvas.width) {
+      playerScore++;
+      beep.play();
+      resetPuck();
+      checkGameOver();
+    }
+  }
+
+  function checkGameOver() {
+    if (playerScore >= scoreLimit || player2Score >= scoreLimit) {
+      gameOver = true;
+      showGameOver();
+    }
+  }
+
+  function showGameOver() {
+    const popup = document.getElementById('gameOverPopup');
+    const winnerText = document.getElementById('winnerText');
+    let winner = playerScore >= scoreLimit ? "Sol Oyuncu Kazandı! 🎉" : "Sağ Oyuncu Kazandı! 🤖";
+    winnerText.textContent = winner;
+    popup.style.display = 'block';
+  }
+
+  function restartGame() {
+    playerScore = 0;
+    player2Score = 0;
+    seconds = 0;
+    gameOver = false;
+    resetPuck();
+    startTimer();
+    document.getElementById('gameOverPopup').style.display = 'none';
+  }
+
+  function updateBotSpeed() {
+    const select = document.getElementById('difficultySelect');
+    const val = select.value;
+    if (val === 'easy') botSpeed = 2;
+    else if (val === 'medium') botSpeed = 4;
+    else if (val === 'hard') botSpeed = 7;
+  }
+
+  let bgTime = 0;
+  function drawBackground() {
+    const w = bgCanvas.width;
+    const h = bgCanvas.height;
+
+    bgCtx.clearRect(0, 0, w, h);
+
+    const gradient = bgCtx.createLinearGradient(0, 0, w, h);
+    gradient.addColorStop(0, "#0a0a0a");
+    gradient.addColorStop(1, "#1a1a1a");
+    bgCtx.fillStyle = gradient;
+    bgCtx.fillRect(0, 0, w, h);
+
+    const centerX = w / 2;
+    const centerY = h / 2;
+
+    for (let i = 0; i < 5; i++) {
+      const radius = 50 + i * 50 + Math.sin(bgTime + i) * 10;
+      const alpha = 0.05 + 0.1 * (1 - i / 5);
+      bgCtx.beginPath();
+      bgCtx.strokeStyle = `rgba(100, 200, 255, ${alpha})`;
+      bgCtx.lineWidth = 3;
+      bgCtx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+      bgCtx.stroke();
+    }
+
+    bgTime += 0.02;
+  }
+
+  function update() {
+    if (gameOver) return;
+
+    puck.x += puck.vx;
+    puck.y += puck.vy;
+
+    if (puck.y - puck.radius < 0 || puck.y + puck.radius > canvas.height) puck.vy *= -1;
+
+    if (checkCollision(puck, player)) {
+      puck.vx = Math.abs(puck.vx);
+      puck.vx += 0.2;
+      puck.vy += (puck.y - player.y) * 0.05;
+    }
+    if (checkCollision(puck, player2)) {
+      puck.vx = -Math.abs(puck.vx);
+      puck.vx -= 0.2;
+      puck.vy += (puck.y - player2.y) * 0.05;
+    }
+
+    if (gameMode === 'bot') movePlayersWithMouse(); 
+    else if (gameMode === 'two') movePlayersWithMouse();
+
+    checkGoal();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    ctx.strokeStyle = "#666";
+    ctx.beginPath();
+    ctx.moveTo(canvas.width / 2, 0);
+    ctx.lineTo(canvas.width / 2, canvas.height);
+    ctx.stroke();
+
+    drawScoreboard();
+    drawCircle(player, "blue");
+    drawCircle(player2, "red");
+    drawCircle(puck, "white");
+  }
+
+  function drawScoreboard() {
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, canvas.width, 40);
+    ctx.fillStyle = "white";
+    ctx.font = "16px Arial";
+    ctx.fillText(`Süre: ${seconds} s`, 20, 25);
+    ctx.fillText(`Sol Oyuncu: ${playerScore}`, canvas.width / 2 - 120, 25);
+    ctx.fillText(`Sağ Oyuncu: ${player2Score}`, canvas.width / 2 + 20, 25);
+  }
+
+  function gameLoop() {
+    drawBackground();
+    update();
+    draw();
+    requestAnimationFrame(gameLoop);
+  }
+
+  function startGame(mode) {
+    gameMode = mode;
+    playerScore = 0;
+    player2Score = 0;
+    seconds = 0;
+    gameOver = false;
+    resetPuck();
+    updateBotSpeed();
+    startTimer();
+    document.getElementById('gameOverPopup').style.display = 'none';
+  }
+
+  document.getElementById('difficultySelect').addEventListener('change', updateBotSpeed);
+
+  startGame('bot');
+  gameLoop();
+
+</script>
+</body>
+</html>
